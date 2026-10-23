@@ -1,1 +1,19 @@
-# admin-cloud-service
+# Admin and audit ownership
+
+The implemented administrative runtime is the Go `cmd/admin` command in sibling `user-notification-service`, built with Docker `TARGET=admin`; it listens on HTTPS 8004. This repository is not an additional empty deployment or cloud-control API. The historical combined application has been removed.
+
+Admin owns only `audit_db`: durable Kafka inbox, sanitized audit projection, encrypted quarantine/DLQ outbox and administrative command audit. Apply its versioned transactional migration with `go run ./cmd/admin migrate` using its migration role, then run with a restricted audit runtime credential. It never reads identity/profile/notification databases.
+
+Public APIs: GET `/api/v1/admin/users?query=`, POST `/api/v1/admin/users/{id}/ban` and `/unban`, GET `/api/v1/admin/audit`, GET `/api/v1/admin/deliveries`, POST `/api/v1/admin/deliveries/{id}/replay`, GET `/api/v1/admin/quarantine`, POST `/api/v1/admin/quarantine/{id}/replay`. Every call requires authoritative live identity introspection, MFA and its exact permission (`users:read`, `users:write`, `audit:read`, `deliveries:read`, `deliveries:replay`). Cookie/CSRF/Origin and bearer actor credentials are forwarded over CA-verified HTTPS with bounded deadlines; caller-supplied IDs never authorize the caller. Notification independently rechecks live actor authorization. Commands have durable requested/succeeded/denied/unknown audit, including uncertain provider outcomes.
+
+Identity user search/ban/unban and notification delivery/replay use their protected internal APIs with a distinct admin service token. Missing dependencies fail closed. There are no fake AWS controls, direct cross-service SQL, public bootstrap or cloud operations. TLS health/ready/metrics use the common contract. Full environment/build/migration/test commands are documented in `user-notification-service/README.md`; that repository's independent CI owns the actual binary. Genuine Telegram acceptance requires externally supplied bot credentials and a real test chat and remains separate from this admin runtime.
+
+Remediation: replaced the previously empty implied admin service with explicit ownership and an implemented, auditable runtime instead of claiming that a README represents a deployable application.
+
+## Observed local acceptance — 2026-10-23
+
+The integration controller exercised the actual HTTPS administrative service with live identity sessions and MFA: user search, ban/unban, audit access, delivery inspection and protected replay. Real Kafka/Mailpit integration verified profile/session/CSRF paths, duplicate-event idempotency, poison quarantine and corrected replay, and persisted SMTP-outage retry followed by recovery. An actual worker terminal invalid-recipient failure and replay-without-correction produced a real failure metric and Prometheus alert; that scenario is validation/business failure, not a claim of SMTP-provider rejection. A known trace crossed all five application services, including admin/audit.
+
+The owning Go module passed Go 1.26.10 vet, real PostgreSQL/Kafka race tests, the exact disposable-broker CI script and four-command builds. Trivy scanning of the actual scratch-image Go executable reported zero HIGH/CRITICAL findings. These controller-observed checks are local acceptance evidence, not proof that remote GitHub Actions ran or that a production deployment was verified. SMTP remains at-least-once with an explicit provider-accepted/local-commit ambiguity window.
+
+External gates remain: genuine Telegram bot credentials and user-controlled test chat were absent, and the secret-authenticated gateway webhook requires externally reachable HTTPS provisioning. Remote CI requires a configured immutable 40-hex contracts revision matching the pinned source-tree digest; remote Actions were not executed. No cloud operations or remote publication were performed.
